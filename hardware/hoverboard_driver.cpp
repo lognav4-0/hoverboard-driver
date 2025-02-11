@@ -42,9 +42,10 @@ namespace hoverboard_driver
     cmd_pub[right_wheel] = this->create_publisher<std_msgs::msg::Float64>("hoverboard/right_wheel/cmd", 3);
     voltage_pub = this->create_publisher<std_msgs::msg::Float64>("hoverboard/battery_voltage", 3);
     temp_pub = this->create_publisher<std_msgs::msg::Float64>("hoverboard/temperature", 3);
-    curr_pub[left_wheel] = this->create_publisher<std_msgs::msg::Float64>("hoverboard/left_wheel/dc_current", 3);
-    curr_pub[right_wheel] = this->create_publisher<std_msgs::msg::Float64>("hoverboard/right_wheel/dc_current", 3);
+    // curr_pub[left_wheel] = this->create_publisher<std_msgs::msg::Float64>("hoverboard/left_wheel/dc_current", 3);
+    // curr_pub[right_wheel] = this->create_publisher<std_msgs::msg::Float64>("hoverboard/right_wheel/dc_current", 3);
     connected_pub = this->create_publisher<std_msgs::msg::Bool>("hoverboard/connected", 3);
+    button_pub = this->create_publisher<std_msgs::msg::Bool>("emergency_button",0);
 
     declare_parameter("f", 10.2);
     declare_parameter("p", 1.0);
@@ -106,6 +107,13 @@ namespace hoverboard_driver
     std_msgs::msg::Float64 f;
     f.data = message;
     temp_pub->publish(f);
+  }
+
+  void hoverboard_driver_node::publish_button_state(bool message)
+  {
+    std_msgs::msg::Bool b;
+    b.data = message;
+    button_pub->publish(b);
   }
 
   void hoverboard_driver_node::publish_connected(bool message)
@@ -367,9 +375,11 @@ namespace hoverboard_driver
 
   void hoverboard_driver::protocol_recv(const rclcpp::Time &time, char byte)
   {
+    
     start_frame = ((uint16_t)(byte) << 8) | (uint8_t)prev_byte;
 
     // Read the start frame
+    // RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "msg_len: %zu, sizeof(SerialFeedback): %zu", msg_len, sizeof(SerialFeedback));
     if (start_frame == START_FRAME)
     {
       p = (char *)&msg;
@@ -386,6 +396,7 @@ namespace hoverboard_driver
 
     if (msg_len == sizeof(SerialFeedback))
     {
+      // RCLCPP_WARN(rclcpp::get_logger("hoverboard_driver"), "DENTRO");
       uint16_t checksum = (uint16_t)(msg.start ^
                                      msg.cmd1 ^
                                      msg.cmd2 ^
@@ -403,14 +414,15 @@ namespace hoverboard_driver
         hardware_publisher->publish_voltage((double)msg.batVoltage / 100.0);
         hardware_publisher->publish_temp((double)msg.boardTemp / 10.0);
         ;
-        hardware_publisher->publish_curr(left_wheel, (double)msg.left_dc_curr / 100.0);
-        hardware_publisher->publish_curr(right_wheel, (double)msg.right_dc_curr / 100.0);
+        // hardware_publisher->publish_curr(left_wheel, (double)msg.left_dc_curr / 100.0);
+        // hardware_publisher->publish_curr(right_wheel, (double)msg.right_dc_curr / 100.0);
 
         // Convert RPM to RAD/S
         hw_velocities_[left_wheel] = direction_correction * (abs(msg.speedL_meas) * 0.10472);
         hw_velocities_[right_wheel] = direction_correction * (abs(msg.speedR_meas) * 0.10472);
         hardware_publisher->publish_vel(left_wheel, hw_velocities_[left_wheel]);
         hardware_publisher->publish_vel(right_wheel, hw_velocities_[right_wheel]);
+        hardware_publisher->publish_button_state(!msg.button_state);
 
         // Process encoder values and update odometry
         on_encoder_update(time, msg.wheelR_cnt, msg.wheelL_cnt);
@@ -481,6 +493,8 @@ namespace hoverboard_driver
 
   void hoverboard_driver::on_encoder_update(const rclcpp::Time &time, int16_t right, int16_t left)
   {
+    // RCLCPP_ERROR(rclcpp::get_logger("hoverboard_driver"), "on_encoder_update");
+
     double posL = 0.0, posR = 0.0;
 
     // Calculate wheel position in ticks, factoring in encoder wraps
